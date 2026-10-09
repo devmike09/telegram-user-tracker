@@ -1,3 +1,5 @@
+
+import csv
 import os
 from datetime import datetime, timezone
 
@@ -8,52 +10,65 @@ from telegram.ext import (
     ContextTypes,
 )
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
+TOKEN = os.environ["BOT_TOKEN"]
+CSV_FILE = os.environ.get("CSV_FILE", "users.csv")
 
 
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
-) -> None:
+):
     user = update.effective_user
-    message = update.effective_message
 
-    if user is None or message is None:
+    if user is None:
         return
 
-    username = f"@{user.username}" if user.username else "Not set"
-    first_name = user.first_name or "Not provided"
-    user_id = user.id
-    started_at = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
+    file_exists = os.path.exists(CSV_FILE)
+    already_saved = False
+
+    if file_exists:
+        with open(
+            CSV_FILE, "r", newline="", encoding="utf-8"
+        ) as file:
+            reader = csv.DictReader(file)
+            already_saved = any(
+                row["user_id"] == str(user.id)
+                for row in reader
+            )
+
+    if not already_saved:
+        with open(
+            CSV_FILE, "a", newline="", encoding="utf-8"
+        ) as file:
+            writer = csv.writer(file)
+
+            if not file_exists or os.path.getsize(CSV_FILE) == 0:
+                writer.writerow([
+                    "user_id",
+                    "username",
+                    "first_name",
+                    "last_name",
+                    "first_started_at_utc",
+                ])
+
+            writer.writerow([
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or "",
+                datetime.now(timezone.utc).isoformat(),
+            ])
+
+    await update.message.reply_text(
+        f"Welcome, {user.first_name}! "
+        "You have successfully started the bot."
     )
 
-    # Notify the admin, but don't stop the welcome message
-    # if the admin notification fails.
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=(
-                "🔔 New user started your bot!\n\n"
-                f"Username: {username}\n"
-                f"First name: {first_name}\n"
-                f"Telegram ID: {user_id}\n"
-                f"Started at: {started_at}"
-            ),
-        )
-    except Exception:
-        print("Could not send admin notification.")
 
-    await message.reply_text(
-        f"Welcome, {first_name}!\n"
-        "You've successfully started the bot."
-    )
-
-
-def main() -> None:
-    app = Application.builder().token(BOT_TOKEN).build()
+def main():
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+
     print("Bot is running...")
     app.run_polling()
 
